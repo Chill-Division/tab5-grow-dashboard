@@ -14,8 +14,8 @@ that shows grow-room conditions from Home Assistant, each value with a 6-hour ch
 - The header shows the time and an **HA offline** badge whenever Home Assistant is disconnected.
 
 > [!NOTE]
-> Status: the configuration validates and compiles for the ESP32-P4 on ESPHome 2026.9, and the screenshots above
-> were rendered from it with synthetic data. It hasn't been run on a Tab5 yet; that's the next step before 1.0.
+> Status: running on a Tab5 with the ST7121 panel, still pre-1.0. The screenshots above were rendered from the
+> configuration with synthetic data.
 
 ## What you need
 

@@ -10,7 +10,7 @@ substitutions:
   room_name: Grow room
 
   # Release to use. Change it to update; the package and its C++ helpers both follow it.
-  dashboard_ref: v0.1.0
+  dashboard_ref: v0.1.1
 
   # Your sensors in Home Assistant
   vpd_entity: sensor.room_vpd
