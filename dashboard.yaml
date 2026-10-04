@@ -177,12 +177,8 @@ time:
       # every 15 minutes, which also repairs gaps left by a dropped connection.
       - if:
           condition:
-            and:
-              - api.connected:
-                  state_subscription_only: true
-              - lambda: return grow_dashboard::any_gaps();
+            lambda: return grow_dashboard::any_gaps();
           then:
-            - delay: 5s
             - script.execute: backfill_history
     on_time:
       - seconds: 0
@@ -345,49 +341,65 @@ script:
   - id: backfill_history
     mode: single
     then:
+      # The first time sync arrives the moment HA connects, before HA has subscribed to
+      # this device's action calls, and an action sent before then is dropped. So wait
+      # for the subscriptions first.
+      - wait_until:
+          condition:
+            api.connected:
+              state_subscription_only: true
+          timeout: 60s
+      - delay: 5s
       - if:
           condition:
-            lambda: return id(backfill_unanswered) < 3;
+            api.connected:
+              state_subscription_only: true
           then:
-            - lambda: id(backfill_unanswered)++;
-            - homeassistant.action:
-                action: recorder.get_statistics
-                data:
-                  period: 5minute
-                  types: mean
-                data_template:
-                  statistic_ids: >-
-                    {{ ['${vpd_entity}', '${co2_entity}', '${temp_entity}', '${humidity_entity}',
-                    '${substrate_temp_entity}', '${vwc_entity}', '${bulk_ec_entity}'] }}
-                  start_time: "{{ (now() - timedelta(hours=6, minutes=10)).isoformat() }}"
-                capture_response: true
-                response_template: >-
-                  {
-                  {%- for entity, rows in response.statistics.items() -%}
-                  "{{ entity }}":[
-                  {%- for r in rows if 'mean' in r -%}
-                  [{{ (as_timestamp(r.start) | int) // 300 }},{{ r.mean | round(4) }}]{{ ',' if not loop.last }}
-                  {%- endfor -%}
-                  ]{{ ',' if not loop.last }}
-                  {%- endfor -%}
-                  }
-                on_success:
+            - if:
+                condition:
+                  lambda: return id(backfill_unanswered) < 3;
+                then:
                   - lambda: |-
-                      id(backfill_unanswered) = 0;
-                      JsonObjectConst stats = response["response"];
-                      grow_dashboard::backfill(stats, id(ha_time).now().timestamp);
-                      ESP_LOGI("history", "Backfilled history for %u of 7 sensors", (unsigned) stats.size());
-                on_error:
-                  - lambda: |-
-                      id(backfill_unanswered) = 0;
-                      ESP_LOGW("history", "recorder.get_statistics failed: %s", error.c_str());
-          else:
-            - logger.log:
-                level: WARN
-                tag: history
-                format: >-
-                  Home Assistant did not answer the last 3 history requests. Enable "Allow the device
-                  to perform Home Assistant actions" for this device in HA, then restart the Tab5.
+                      id(backfill_unanswered)++;
+                      ESP_LOGI("history", "Requesting the last 6 h from Home Assistant");
+                  - homeassistant.action:
+                      action: recorder.get_statistics
+                      data:
+                        period: 5minute
+                        types: mean
+                      data_template:
+                        statistic_ids: >-
+                          {{ ['${vpd_entity}', '${co2_entity}', '${temp_entity}', '${humidity_entity}',
+                          '${substrate_temp_entity}', '${vwc_entity}', '${bulk_ec_entity}'] }}
+                        start_time: "{{ (now() - timedelta(hours=6, minutes=10)).isoformat() }}"
+                      capture_response: true
+                      response_template: >-
+                        {
+                        {%- for entity, rows in response.statistics.items() -%}
+                        "{{ entity }}":[
+                        {%- for r in rows if 'mean' in r -%}
+                        [{{ (as_timestamp(r.start) | int) // 300 }},{{ r.mean | round(4) }}]{{ ',' if not loop.last }}
+                        {%- endfor -%}
+                        ]{{ ',' if not loop.last }}
+                        {%- endfor -%}
+                        }
+                      on_success:
+                        - lambda: |-
+                            id(backfill_unanswered) = 0;
+                            JsonObjectConst stats = response["response"];
+                            grow_dashboard::backfill(stats, id(ha_time).now().timestamp);
+                            ESP_LOGI("history", "Backfilled history for %u of 7 sensors", (unsigned) stats.size());
+                      on_error:
+                        - lambda: |-
+                            id(backfill_unanswered) = 0;
+                            ESP_LOGW("history", "recorder.get_statistics failed: %s", error.c_str());
+                else:
+                  - logger.log:
+                      level: WARN
+                      tag: history
+                      format: >-
+                        Home Assistant did not answer the last 3 history requests. Enable "Allow the device
+                        to perform Home Assistant actions" for this device in HA, then restart the Tab5.
 
 interval:
   # Sample every tile into its trend. Readings only count while HA is connected; any
