@@ -1,0 +1,45 @@
+name: Build
+
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    # Weekly, to catch ESPHome releases that break the dashboard
+    - cron: "17 3 * * 1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ESPHome
+        id: esphome
+        run: |
+          pip install esphome
+          echo "version=$(esphome version | sed 's/^Version: //')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/esphome
+          key: esphome-${{ steps.esphome.outputs.version }}
+
+      - name: Placeholder secrets
+        run: |
+          cat > secrets.yaml <<'EOF'
+          wifi_ssid: ci
+          wifi_password: ci-password
+          api_encryption_key: "pWj5Yzc8nG8b1Vq9mJ1nqVp4o4Zr7f5VZb9cKqI4b2E="
+          EOF
+
+      # Build example.yaml against this commit rather than the release it names
+      - name: Validate
+        run: esphome -s dashboard_ref ${{ github.sha }} config example.yaml
+
+      - name: Compile
+        run: esphome -s dashboard_ref ${{ github.sha }} compile example.yaml

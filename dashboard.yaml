@@ -1,0 +1,1079 @@
+# Tab5 grow dashboard: ESPHome package for the M5Stack Tab5 (ST7121/ST7123 panel)
+#
+# Two swipeable screens of Home Assistant data, each tile showing the live value and a
+# 6-hour chart:
+#   Climate:   VPD, CO2, temperature, humidity
+#   Substrate: temperature, VWC, bulk EC
+#
+# Don't edit this file: include it from your device YAML (see example.yaml) and override
+# the substitutions below there. Your device YAML also holds wifi/api/ota, since remote
+# packages can't use secrets.
+#
+# Needs ESPHome 2026.8 or newer. In Home Assistant, turn on "Allow the device to perform
+# Home Assistant actions" for the device, so it can fetch the last 6 hours from HA's
+# statistics at boot.
+
+substitutions:
+  name: m5stack-tab5
+  friendly_name: M5Stack Tab5
+  room_name: Grow room
+  # Release of this repo to use for the C++ helpers; set it to the same ref you include
+  # this package at, so the two always match.
+  dashboard_ref: main
+  # M5STACK-TAB5-ST7121 or M5STACK-TAB5-ST7123, whichever controller your panel has
+  display_model: M5STACK-TAB5-ST7121
+  # Landscape. Use 270 if the picture is upside down for the way you've mounted it.
+  rotation: "90"
+
+  # One block per tile: the HA entity, the unit shown, decimal places, and the target
+  # range (the green band on the chart; outside it the tile shows an amber High/Low).
+  # Entities need a state_class (most sensors have one) for their history to backfill.
+  vpd_entity: sensor.room_vpd
+  vpd_unit: kPa
+  vpd_decimals: "2"
+  vpd_low: "0.8"
+  vpd_high: "1.2"
+
+  co2_entity: sensor.room_co2
+  co2_unit: ppm
+  co2_decimals: "0"
+  co2_low: "800"
+  co2_high: "1200"
+
+  temp_entity: sensor.room_temperature
+  temp_unit: °C
+  temp_decimals: "1"
+  temp_low: "22"
+  temp_high: "28"
+
+  humidity_entity: sensor.room_humidity
+  humidity_unit: "%"
+  humidity_decimals: "0"
+  humidity_low: "55"
+  humidity_high: "70"
+
+  substrate_temp_entity: sensor.substrate_temperature
+  substrate_temp_unit: °C
+  substrate_temp_decimals: "1"
+  substrate_temp_low: "18"
+  substrate_temp_high: "24"
+
+  vwc_entity: sensor.substrate_vwc
+  vwc_unit: "%"
+  vwc_decimals: "1"
+  vwc_low: "40"
+  vwc_high: "60"
+
+  bulk_ec_entity: sensor.substrate_bulk_ec
+  bulk_ec_unit: dS/m
+  bulk_ec_decimals: "2"
+  bulk_ec_low: "1.5"
+  bulk_ec_high: "3.0"
+
+  # The screens swap every cycle_interval, once nobody has touched them for cycle_pause.
+  cycle_interval: 30s
+  cycle_pause: 3min
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 600
+      then:
+        - rx8130.read_time:
+    - priority: -100
+      then:
+        - lambda: |-
+            grow_dashboard::theme = {id(card_bg), id(grid_color), id(band_color), id(band_edge_color)};
+        - script.execute: update_header
+        - script.execute: update_clock
+        - script.execute:
+            id: draw_charts
+            all: true
+
+# The C++ helpers the lambdas below call (components/grow_dashboard in this repo)
+external_components:
+  - source: github://Chill-Division/tab5-grow-dashboard@${dashboard_ref}
+    components: [grow_dashboard]
+
+grow_dashboard:
+
+esp32:
+  variant: esp32p4
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true
+  # Drop this line if you have a production-revision board and it won't boot
+  engineering_sample: true
+
+# Wi-Fi / BT live on the on-board ESP32-C6, reached over SDIO
+esp32_hosted:
+  variant: esp32c6
+  active_high: true
+  clk_pin: GPIO12
+  cmd_pin: GPIO13
+  d0_pin: GPIO11
+  d1_pin: GPIO10
+  d2_pin: GPIO9
+  d3_pin: GPIO8
+  reset_pin: GPIO15
+  slot: 1
+
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+# Board-support I2C bus: RTC, INA226, GPIO expanders, touch
+i2c:
+  - id: bsp_bus
+    sda: GPIO31
+    scl: GPIO32
+    frequency: 400kHz
+
+# 2.5V rail required by the MIPI-DSI PHY
+esp_ldo:
+  - voltage: 2.5V
+    channel: 3
+
+# GPIO expanders: power rails, display and touch reset
+pi4ioe5v6408:
+  - id: pi4ioe1
+    address: 0x43
+  - id: pi4ioe2
+    address: 0x44
+
+output:
+  - platform: ledc
+    pin: GPIO22
+    id: backlight_pwm
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 250ms
+
+time:
+  # Battery-backed RTC, read at boot so the clock is sane before Wi-Fi
+  - platform: rx8130
+    id: rtc_time
+    i2c_id: bsp_bus
+    update_interval: never
+    timezone: UTC
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      - rx8130.write_time:
+      - script.execute: update_clock
+      # Fetch any missing chart history from HA (all of it after a reboot). Syncs repeat
+      # every 15 minutes, which also repairs gaps left by a dropped connection.
+      - if:
+          condition:
+            and:
+              - api.connected:
+                  state_subscription_only: true
+              - lambda: return grow_dashboard::any_gaps();
+          then:
+            - delay: 5s
+            - script.execute: backfill_history
+    on_time:
+      - seconds: 0
+        then:
+          - script.execute: update_clock
+
+switch:
+  # Leave this ON - switching it off kills the C6 radio
+  - platform: gpio
+    id: wifi_power
+    name: "WiFi Power"
+    pin:
+      pi4ioe5v6408: pi4ioe2
+      number: 0
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: charge_enable
+    name: "Charge Enable"
+    pin:
+      pi4ioe5v6408: pi4ioe2
+      number: 7
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: external_5v_power
+    name: "External 5V Power"
+    pin:
+      pi4ioe5v6408: pi4ioe1
+      number: 2
+
+sensor:
+  - platform: ina226
+    address: 0x41
+    adc_averaging: 16
+    max_current: 8.192A
+    shunt_resistance: 0.005ohm
+    bus_voltage:
+      id: battery_voltage
+      name: "Battery Voltage"
+    current:
+      id: battery_current
+      name: "Battery Current"
+
+  # Values from Home Assistant. Each update refreshes its tile's number and status;
+  # the charts are fed separately, by the 10 s sampler under interval:.
+  - platform: homeassistant
+    id: vpd
+    entity_id: ${vpd_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(vpd_value), id(vpd_target), id(vpd_status), x, ${vpd_decimals}, ${vpd_low}, ${vpd_high});
+  - platform: homeassistant
+    id: co2
+    entity_id: ${co2_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(co2_value), id(co2_target), id(co2_status), x, ${co2_decimals}, ${co2_low}, ${co2_high});
+  - platform: homeassistant
+    id: temp
+    entity_id: ${temp_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(temp_value), id(temp_target), id(temp_status), x, ${temp_decimals}, ${temp_low}, ${temp_high});
+  - platform: homeassistant
+    id: humidity
+    entity_id: ${humidity_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(humidity_value), id(humidity_target), id(humidity_status), x, ${humidity_decimals}, ${humidity_low}, ${humidity_high});
+  - platform: homeassistant
+    id: substrate_temp
+    entity_id: ${substrate_temp_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(substrate_temp_value), id(substrate_temp_target), id(substrate_temp_status), x, ${substrate_temp_decimals}, ${substrate_temp_low}, ${substrate_temp_high});
+  - platform: homeassistant
+    id: vwc
+    entity_id: ${vwc_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(vwc_value), id(vwc_target), id(vwc_status), x, ${vwc_decimals}, ${vwc_low}, ${vwc_high});
+  - platform: homeassistant
+    id: bulk_ec
+    entity_id: ${bulk_ec_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(bulk_ec_value), id(bulk_ec_target), id(bulk_ec_status), x, ${bulk_ec_decimals}, ${bulk_ec_low}, ${bulk_ec_high});
+
+captive_portal:
+
+display:
+  - platform: mipi_dsi
+    id: tab5_display
+    dimensions:
+      height: 1280
+      width: 720
+    model: ${display_model}
+    reset_pin:
+      pi4ioe5v6408: pi4ioe1
+      number: 4
+    # LVGL drives the panel, so no lambda here and no polling
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: st7123
+    id: tab5_touch
+    i2c_id: bsp_bus
+    display: tab5_display
+    interrupt_pin: GPIO23
+    reset_pin:
+      pi4ioe5v6408: pi4ioe1
+      number: 5
+
+globals:
+  # History requests sent without any answer. HA doesn't reply at all while device
+  # actions are disabled, so stop asking after a few.
+  - id: backfill_unanswered
+    type: int
+    initial_value: "0"
+
+script:
+  # Redraws charts whose data changed. Normally one per call, so a burst of updates is
+  # spread over several loop passes instead of stalling touch and animations.
+  - id: draw_charts
+    parameters:
+      all: bool
+    then:
+      - lambda: |-
+          using grow_dashboard::trend;
+          const auto line = id(accent);
+          const char *two_lines = "Last 6 h\n%s – %s";
+          const char *one_line = "6 h  %s – %s";
+          bool drew = false;
+          // canvas, range label, trend, target low/high, smallest y span, decimals, range text
+          auto draw = [&](lv_obj_t *canvas, lv_obj_t *range, grow_dashboard::Trend &t, float low, float high, float span,
+                          int decimals, const char *range_format) {
+            if (all || !drew)
+              drew |= grow_dashboard::draw_trend(canvas, range, t, line, low, high, span, decimals, range_format);
+          };
+          draw(id(vpd_chart), id(vpd_range), trend("${vpd_entity}"), ${vpd_low}, ${vpd_high}, 0.4, ${vpd_decimals}, two_lines);
+          draw(id(co2_chart), id(co2_range), trend("${co2_entity}"), ${co2_low}, ${co2_high}, 300, ${co2_decimals}, two_lines);
+          draw(id(temp_chart), id(temp_range), trend("${temp_entity}"), ${temp_low}, ${temp_high}, 3, ${temp_decimals}, two_lines);
+          draw(id(humidity_chart), id(humidity_range), trend("${humidity_entity}"), ${humidity_low}, ${humidity_high}, 10, ${humidity_decimals}, two_lines);
+          draw(id(substrate_temp_chart), id(substrate_temp_range), trend("${substrate_temp_entity}"), ${substrate_temp_low}, ${substrate_temp_high}, 3, ${substrate_temp_decimals}, one_line);
+          draw(id(vwc_chart), id(vwc_range), trend("${vwc_entity}"), ${vwc_low}, ${vwc_high}, 10, ${vwc_decimals}, one_line);
+          draw(id(bulk_ec_chart), id(bulk_ec_range), trend("${bulk_ec_entity}"), ${bulk_ec_low}, ${bulk_ec_high}, 0.6, ${bulk_ec_decimals}, one_line);
+
+  - id: update_header
+    then:
+      - lambda: |-
+          const bool climate = lv_tileview_get_tile_active(id(tiles)) == id(tile_climate);
+          lv_label_set_text(id(title_label), climate ? "Climate" : "Substrate");
+          lv_obj_set_style_bg_color(id(dot_climate), grow_dashboard::to_lv(climate ? id(ink_primary) : id(dot_dim)), LV_PART_MAIN);
+          lv_obj_set_style_bg_color(id(dot_substrate), grow_dashboard::to_lv(climate ? id(dot_dim) : id(ink_primary)), LV_PART_MAIN);
+
+  - id: update_clock
+    then:
+      - lvgl.label.update:
+          id: clock_label
+          text: !lambda |-
+            auto now = id(ha_time).now();
+            return now.is_valid() ? now.strftime("%H:%M") : std::string("--:--");
+
+  # Pulls the last 6 h of 5-minute means for every tile from HA's statistics. The
+  # response_template runs in HA and trims the reply to [[bucket, mean], ...] per entity,
+  # where bucket is the unix time / 300 of each 5-minute period.
+  - id: backfill_history
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: return id(backfill_unanswered) < 3;
+          then:
+            - lambda: id(backfill_unanswered)++;
+            - homeassistant.action:
+                action: recorder.get_statistics
+                data:
+                  period: 5minute
+                  types: mean
+                data_template:
+                  statistic_ids: >-
+                    {{ ['${vpd_entity}', '${co2_entity}', '${temp_entity}', '${humidity_entity}',
+                    '${substrate_temp_entity}', '${vwc_entity}', '${bulk_ec_entity}'] }}
+                  start_time: "{{ (now() - timedelta(hours=6, minutes=10)).isoformat() }}"
+                capture_response: true
+                response_template: >-
+                  {
+                  {%- for entity, rows in response.statistics.items() -%}
+                  "{{ entity }}":[
+                  {%- for r in rows if 'mean' in r -%}
+                  [{{ (as_timestamp(r.start) | int) // 300 }},{{ r.mean | round(4) }}]{{ ',' if not loop.last }}
+                  {%- endfor -%}
+                  ]{{ ',' if not loop.last }}
+                  {%- endfor -%}
+                  }
+                on_success:
+                  - lambda: |-
+                      id(backfill_unanswered) = 0;
+                      JsonObjectConst stats = response["response"];
+                      grow_dashboard::backfill(stats, id(ha_time).now().timestamp);
+                      ESP_LOGI("history", "Backfilled history for %u of 7 sensors", (unsigned) stats.size());
+                on_error:
+                  - lambda: |-
+                      id(backfill_unanswered) = 0;
+                      ESP_LOGW("history", "recorder.get_statistics failed: %s", error.c_str());
+          else:
+            - logger.log:
+                level: WARN
+                tag: history
+                format: >-
+                  Home Assistant did not answer the last 3 history requests. Enable "Allow the device
+                  to perform Home Assistant actions" for this device in HA, then restart the Tab5.
+
+interval:
+  # Sample every tile into its trend. Readings only count while HA is connected; any
+  # gap is filled in from HA's statistics on the next time sync.
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            time.has_time:
+              id: ha_time
+          then:
+            - lambda: |-
+                using grow_dashboard::trend;
+                const int64_t now = id(ha_time).now().timestamp;
+                if (!api::global_api_server->is_connected_with_state_subscription()) {
+                  grow_dashboard::advance_all(now);
+                  return;
+                }
+                trend("${vpd_entity}").add_sample(now, id(vpd).state);
+                trend("${co2_entity}").add_sample(now, id(co2).state);
+                trend("${temp_entity}").add_sample(now, id(temp).state);
+                trend("${humidity_entity}").add_sample(now, id(humidity).state);
+                trend("${substrate_temp_entity}").add_sample(now, id(substrate_temp).state);
+                trend("${vwc_entity}").add_sample(now, id(vwc).state);
+                trend("${bulk_ec_entity}").add_sample(now, id(bulk_ec).state);
+      - if:
+          condition:
+            api.connected:
+              state_subscription_only: true
+          then:
+            - lvgl.widget.hide: ha_offline
+          else:
+            - lvgl.widget.show: ha_offline
+
+  - interval: 200ms
+    then:
+      - script.execute:
+          id: draw_charts
+          all: false
+
+  # Flip between the two screens while nobody is using them
+  - interval: ${cycle_interval}
+    then:
+      - if:
+          condition:
+            lvgl.is_idle:
+              timeout: ${cycle_pause}
+          then:
+            - if:
+                condition:
+                  lambda: return lv_tileview_get_tile_active(id(tiles)) == id(tile_climate);
+                then:
+                  - lvgl.tileview.select:
+                      id: tiles
+                      tile_id: tile_substrate
+                      animated: true
+                else:
+                  - lvgl.tileview.select:
+                      id: tiles
+                      tile_id: tile_climate
+                      animated: true
+
+color:
+  - id: page_bg
+    hex: "0E1116"
+  - id: card_bg
+    hex: "161B22"
+  - id: ink_primary
+    hex: "F0F3F6"
+  - id: ink_secondary
+    hex: "B7C0CB"
+  - id: ink_muted
+    hex: "8B949E"
+  - id: dot_dim
+    hex: "3A424D"
+  - id: grid_color
+    hex: "262D36"
+  - id: band_color
+    hex: "152B1F"
+  - id: band_edge_color
+    hex: "1F5C2E"
+  - id: accent
+    hex: "3987E5"
+  - id: warning
+    hex: "FAB219"
+  - id: chip_ink
+    hex: "1A1A19"
+
+font:
+  - file: "gfonts://Inter@600"
+    id: font_title
+    size: 36
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°·–₂"
+  - file: "gfonts://Inter@500"
+    id: font_label
+    size: 32
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°·–₂µ³"
+  # Big numbers: digits only, to keep flash use down
+  - file: "gfonts://Inter@600"
+    id: font_value
+    size: 104
+    bpp: 4
+    glyphs: "0123456789.,-"
+  - file: "gfonts://Inter@500"
+    id: font_unit
+    size: 34
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°µ³"
+  - file: "gfonts://Inter@500"
+    id: font_small
+    size: 26
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°·–▲▼₂µ³"
+
+lvgl:
+  displays: tab5_display
+  touchscreens: tab5_touch
+  rotation: ${rotation}
+  default_font: font_small
+  theme:
+    obj:
+      bg_opa: transp
+      border_width: 0
+      radius: 0
+      pad_all: 0
+      scrollable: false
+    label:
+      text_color: ink_primary
+  style_definitions:
+    - id: card
+      bg_color: card_bg
+      bg_opa: cover
+      radius: 24
+    - id: card_label
+      text_font: font_label
+      text_color: ink_secondary
+    - id: value_text
+      text_font: font_value
+      text_color: ink_primary
+    - id: unit_text
+      text_font: font_unit
+      text_color: ink_secondary
+      # Lifts the unit onto the big number's baseline
+      pad_bottom: 17
+    - id: hint_text
+      text_font: font_small
+      text_color: ink_muted
+    - id: range_text
+      text_font: font_small
+      text_color: ink_secondary
+    - id: status_chip
+      text_font: font_small
+      text_color: chip_ink
+      bg_color: warning
+      bg_opa: cover
+      radius: 20
+      pad_left: 14
+      pad_right: 14
+      pad_top: 3
+      pad_bottom: 3
+  pages:
+    - id: main_page
+      bg_color: page_bg
+      bg_opa: cover
+      scrollable: false
+      widgets:
+        # Header: screen title and room, page dots, HA status and clock
+        - obj:
+            x: 0
+            y: 0
+            width: 1280
+            height: 76
+            widgets:
+              - obj:
+                  align: LEFT_MID
+                  x: 30
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  layout:
+                    type: flex
+                    pad_column: 18
+                    flex_flow: row
+                    flex_align_cross: center
+                  widgets:
+                    - label:
+                        id: title_label
+                        text_font: font_title
+                        text: Climate
+                    - label:
+                        text_font: font_label
+                        text_color: ink_muted
+                        text: ${room_name}
+              - obj:
+                  align: CENTER
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  layout:
+                    type: flex
+                    pad_column: 14
+                    flex_flow: row
+                    flex_align_cross: center
+                  widgets:
+                    - obj:
+                        id: dot_climate
+                        width: 14
+                        height: 14
+                        radius: 7
+                        bg_color: ink_primary
+                        bg_opa: cover
+                    - obj:
+                        id: dot_substrate
+                        width: 14
+                        height: 14
+                        radius: 7
+                        bg_color: dot_dim
+                        bg_opa: cover
+              - obj:
+                  align: RIGHT_MID
+                  x: -30
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  layout:
+                    type: flex
+                    pad_column: 22
+                    flex_flow: row
+                    flex_align_cross: center
+                  widgets:
+                    - label:
+                        id: ha_offline
+                        styles: status_chip
+                        hidden: true
+                        text: HA offline
+                    - label:
+                        id: clock_label
+                        text_font: font_title
+                        text: "--:--"
+
+        - tileview:
+            id: tiles
+            x: 0
+            y: 76
+            width: 1280
+            height: 644
+            bg_opa: transp
+            scrollbar_mode: "OFF"
+            on_value:
+              - script.execute: update_header
+            tiles:
+              # ---------------------------------------------------------------- Climate
+              - id: tile_climate
+                row: 0
+                column: 0
+                dir: HOR
+                widgets:
+                  - obj:
+                      styles: card
+                      x: 20
+                      y: 4
+                      width: 612
+                      height: 302
+                      widgets:
+                        - label:
+                            styles: card_label
+                            x: 26
+                            y: 18
+                            text: VPD
+                        - label:
+                            id: vpd_target
+                            styles: hint_text
+                            align: TOP_RIGHT
+                            x: -26
+                            y: 24
+                            text: "Target ${vpd_low}–${vpd_high}"
+                        - label:
+                            id: vpd_status
+                            styles: status_chip
+                            align: TOP_RIGHT
+                            x: -20
+                            y: 20
+                            hidden: true
+                            text: ""
+                        - obj:
+                            x: 26
+                            y: 48
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 10
+                              flex_flow: row
+                              flex_align_cross: end
+                            widgets:
+                              - label:
+                                  id: vpd_value
+                                  styles: value_text
+                                  text: "--"
+                              - label:
+                                  styles: unit_text
+                                  text: ${vpd_unit}
+                        - label:
+                            id: vpd_range
+                            styles: range_text
+                            align: TOP_RIGHT
+                            x: -26
+                            y: 84
+                            text_align: RIGHT
+                            text: ""
+                        - canvas:
+                            id: vpd_chart
+                            x: 26
+                            y: 172
+                            width: 560
+                            height: 110
+
+                  - obj:
+                      styles: card
+                      x: 648
+                      y: 4
+                      width: 612
+                      height: 302
+                      widgets:
+                        - label:
+                            styles: card_label
+                            x: 26
+                            y: 18
+                            text: CO₂
+                        - label:
+                            id: co2_target
+                            styles: hint_text
+                            align: TOP_RIGHT
+                            x: -26
+                            y: 24
+                            text: "Target ${co2_low}–${co2_high}"
+                        - label:
+                            id: co2_status
+                            styles: status_chip
+                            align: TOP_RIGHT
+                            x: -20
+                            y: 20
+                            hidden: true
+                            text: ""
+                        - obj:
+                            x: 26
+                            y: 48
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 10
+                              flex_flow: row
+                              flex_align_cross: end
+                            widgets:
+                              - label:
+                                  id: co2_value
+                                  styles: value_text
+                                  text: "--"
+                              - label:
+                                  styles: unit_text
+                                  text: ${co2_unit}
+                        - label:
+                            id: co2_range
+                            styles: range_text
+                            align: TOP_RIGHT
+                            x: -26
+                            y: 84
+                            text_align: RIGHT
+                            text: ""
+                        - canvas:
+                            id: co2_chart
+                            x: 26
+                            y: 172
+                            width: 560
+                            height: 110
+
+                  - obj:
+                      styles: card
+                      x: 20
+                      y: 322
+                      width: 612
+                      height: 302
+                      widgets:
+                        - label:
+                            styles: card_label
+                            x: 26
+                            y: 18
+                            text: Temperature
+                        - label:
+                            id: temp_target
+                            styles: hint_text
+                            align: TOP_RIGHT
+                            x: -26
+                            y: 24
+                            text: "Target ${temp_low}–${temp_high}"
+                        - label:
+                            id: temp_status
+                            styles: status_chip
+                            align: TOP_RIGHT
+                            x: -20
+                            y: 20
+                            hidden: true
+                            text: ""
+                        - obj:
+                            x: 26
+                            y: 48
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 10
+                              flex_flow: row
+                              flex_align_cross: end
+                            widgets:
+                              - label:
+                                  id: temp_value
+                                  styles: value_text
+                                  text: "--"
+                              - label:
+                                  styles: unit_text
+                                  text: ${temp_unit}
+                        - label:
+                            id: temp_range
+                            styles: range_text
+                            align: TOP_RIGHT
+                            x: -26
+                            y: 84
+                            text_align: RIGHT
+                            text: ""
+                        - canvas:
+                            id: temp_chart
+                            x: 26
+                            y: 172
+                            width: 560
+                            height: 110
+
+                  - obj:
+                      styles: card
+                      x: 648
+                      y: 322
+                      width: 612
+                      height: 302
+                      widgets:
+                        - label:
+                            styles: card_label
+                            x: 26
+                            y: 18
+                            text: Humidity
+                        - label:
+                            id: humidity_target
+                            styles: hint_text
+                            align: TOP_RIGHT
+                            x: -26
+                            y: 24
+                            text: "Target ${humidity_low}–${humidity_high}"
+                        - label:
+                            id: humidity_status
+                            styles: status_chip
+                            align: TOP_RIGHT
+                            x: -20
+                            y: 20
+                            hidden: true
+                            text: ""
+                        - obj:
+                            x: 26
+                            y: 48
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 10
+                              flex_flow: row
+                              flex_align_cross: end
+                            widgets:
+                              - label:
+                                  id: humidity_value
+                                  styles: value_text
+                                  text: "--"
+                              - label:
+                                  styles: unit_text
+                                  text: ${humidity_unit}
+                        - label:
+                            id: humidity_range
+                            styles: range_text
+                            align: TOP_RIGHT
+                            x: -26
+                            y: 84
+                            text_align: RIGHT
+                            text: ""
+                        - canvas:
+                            id: humidity_chart
+                            x: 26
+                            y: 172
+                            width: 560
+                            height: 110
+
+              # -------------------------------------------------------------- Substrate
+              - id: tile_substrate
+                row: 0
+                column: 1
+                dir: HOR
+                widgets:
+                  - obj:
+                      styles: card
+                      x: 20
+                      y: 4
+                      width: 1240
+                      height: 196
+                      widgets:
+                        - label:
+                            styles: card_label
+                            x: 26
+                            y: 12
+                            text: Temperature
+                        - obj:
+                            x: 26
+                            y: 34
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 10
+                              flex_flow: row
+                              flex_align_cross: end
+                            widgets:
+                              - label:
+                                  id: substrate_temp_value
+                                  styles: value_text
+                                  text: "--"
+                              - label:
+                                  styles: unit_text
+                                  text: ${substrate_temp_unit}
+                        # Target hint (or the High/Low chip), then the 6 h range
+                        - obj:
+                            x: 26
+                            y: 148
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 24
+                              flex_flow: row
+                              flex_align_cross: center
+                            widgets:
+                              - label:
+                                  id: substrate_temp_target
+                                  styles: hint_text
+                                  text: "Target ${substrate_temp_low}–${substrate_temp_high}"
+                              - label:
+                                  id: substrate_temp_status
+                                  styles: status_chip
+                                  hidden: true
+                                  text: ""
+                              - label:
+                                  id: substrate_temp_range
+                                  styles: range_text
+                                  text: ""
+                        - canvas:
+                            id: substrate_temp_chart
+                            x: 480
+                            y: 20
+                            width: 734
+                            height: 156
+
+                  - obj:
+                      styles: card
+                      x: 20
+                      y: 216
+                      width: 1240
+                      height: 196
+                      widgets:
+                        - label:
+                            styles: card_label
+                            x: 26
+                            y: 12
+                            text: VWC
+                        - obj:
+                            x: 26
+                            y: 34
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 10
+                              flex_flow: row
+                              flex_align_cross: end
+                            widgets:
+                              - label:
+                                  id: vwc_value
+                                  styles: value_text
+                                  text: "--"
+                              - label:
+                                  styles: unit_text
+                                  text: ${vwc_unit}
+                        - obj:
+                            x: 26
+                            y: 148
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 24
+                              flex_flow: row
+                              flex_align_cross: center
+                            widgets:
+                              - label:
+                                  id: vwc_target
+                                  styles: hint_text
+                                  text: "Target ${vwc_low}–${vwc_high}"
+                              - label:
+                                  id: vwc_status
+                                  styles: status_chip
+                                  hidden: true
+                                  text: ""
+                              - label:
+                                  id: vwc_range
+                                  styles: range_text
+                                  text: ""
+                        - canvas:
+                            id: vwc_chart
+                            x: 480
+                            y: 20
+                            width: 734
+                            height: 156
+
+                  - obj:
+                      styles: card
+                      x: 20
+                      y: 428
+                      width: 1240
+                      height: 196
+                      widgets:
+                        - label:
+                            styles: card_label
+                            x: 26
+                            y: 12
+                            text: Bulk EC
+                        - obj:
+                            x: 26
+                            y: 34
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 10
+                              flex_flow: row
+                              flex_align_cross: end
+                            widgets:
+                              - label:
+                                  id: bulk_ec_value
+                                  styles: value_text
+                                  text: "--"
+                              - label:
+                                  styles: unit_text
+                                  text: ${bulk_ec_unit}
+                        - obj:
+                            x: 26
+                            y: 148
+                            width: SIZE_CONTENT
+                            height: SIZE_CONTENT
+                            layout:
+                              type: flex
+                              pad_column: 24
+                              flex_flow: row
+                              flex_align_cross: center
+                            widgets:
+                              - label:
+                                  id: bulk_ec_target
+                                  styles: hint_text
+                                  text: "Target ${bulk_ec_low}–${bulk_ec_high}"
+                              - label:
+                                  id: bulk_ec_status
+                                  styles: status_chip
+                                  hidden: true
+                                  text: ""
+                              - label:
+                                  id: bulk_ec_range
+                                  styles: range_text
+                                  text: ""
+                        - canvas:
+                            id: bulk_ec_chart
+                            x: 480
+                            y: 20
+                            width: 734
+                            height: 156
