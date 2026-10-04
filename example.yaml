@@ -39,6 +39,10 @@ substitutions:
   bulk_ec_low: "1.5"
   bulk_ec_high: "3.0"
 
+  # The screens swap every cycle_interval, once nobody has touched them for cycle_pause
+  cycle_interval: 30s
+  cycle_pause: 3min
+
 packages:
   dashboard: github://Chill-Division/tab5-grow-dashboard/dashboard.yaml@${dashboard_ref}
 
