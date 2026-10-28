@@ -1,0 +1,97 @@
+# One metric card in a zone row: both probes' values, keyed by the colour of their line,
+# and a 6-hour chart with a line per probe. The High/Low chip follows the zone average.
+# vars: n (zone number), metric (vwc or ec), x, title, unit, low and high (target range)
+obj:
+  styles: card
+  x: ${x}
+  y: 0
+  width: 530
+  height: 196
+  widgets:
+    - obj:
+        x: 18
+        y: 12
+        width: SIZE_CONTENT
+        height: SIZE_CONTENT
+        layout:
+          type: flex
+          flex_flow: row
+          flex_align_cross: end
+          pad_column: 10
+        widgets:
+          - label:
+              styles: card_label
+              text: ${title}
+          - label:
+              styles: hint_text
+              pad_bottom: 2
+              text: ${unit}
+    - obj:
+        x: 18
+        y: 62
+        width: SIZE_CONTENT
+        height: SIZE_CONTENT
+        layout:
+          type: flex
+          flex_flow: row
+          flex_align_cross: center
+          pad_column: 10
+        widgets:
+          - obj:
+              width: 18
+              height: 5
+              radius: 2
+              bg_color: probe1_color
+              bg_opa: cover
+          - label:
+              styles: hint_text
+              text: P1
+          - label:
+              id: zone${n}_${metric}_1_value
+              styles: probe_value
+              text: "--"
+    - obj:
+        x: 18
+        y: 118
+        width: SIZE_CONTENT
+        height: SIZE_CONTENT
+        layout:
+          type: flex
+          flex_flow: row
+          flex_align_cross: center
+          pad_column: 10
+        widgets:
+          - obj:
+              width: 18
+              height: 5
+              radius: 2
+              bg_color: probe2_color
+              bg_opa: cover
+          - label:
+              styles: hint_text
+              text: P2
+          - label:
+              id: zone${n}_${metric}_2_value
+              styles: probe_value
+              text: "--"
+    - label:
+        id: zone${n}_${metric}_target
+        styles: hint_text
+        align: TOP_RIGHT
+        x: -18
+        y: 18
+        text: "Target ${low}–${high}"
+    - label:
+        id: zone${n}_${metric}_status
+        styles: status_chip
+        align: TOP_RIGHT
+        x: -14
+        y: 14
+        hidden: true
+        text: ""
+    - canvas:
+        id: zone${n}_${metric}_chart
+        x: 212
+        y: 62
+        width: 300
+        height: 116

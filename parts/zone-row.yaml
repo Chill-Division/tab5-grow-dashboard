@@ -1,0 +1,54 @@
+# One zone's row on the substrate screen of dashboard-zones.yaml: the zone card with
+# its average substrate temperature, then the VWC and bulk EC cards.
+# vars: n (zone number), y (row position), zone_name
+obj:
+  x: 20
+  y: ${y}
+  width: 1240
+  height: 196
+  widgets:
+    - obj:
+        styles: card
+        x: 0
+        y: 0
+        width: 156
+        height: 196
+        widgets:
+          - label:
+              styles: zone_name
+              x: 16
+              y: 16
+              width: 128
+              long_mode: DOT
+              text: ${zone_name}
+          - label:
+              styles: hint_text
+              x: 16
+              y: 104
+              text: Substrate
+          - label:
+              id: zone${n}_temp
+              styles: zone_name
+              x: 16
+              y: 134
+              text: "--"
+    - !include
+      file: zone-metric.yaml
+      vars:
+        n: ${n}
+        metric: vwc
+        x: 168
+        title: VWC
+        unit: ${vwc_unit}
+        low: ${vwc_low}
+        high: ${vwc_high}
+    - !include
+      file: zone-metric.yaml
+      vars:
+        n: ${n}
+        metric: ec
+        x: 710
+        title: Bulk EC
+        unit: ${bulk_ec_unit}
+        low: ${bulk_ec_low}
+        high: ${bulk_ec_high}

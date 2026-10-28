@@ -1,0 +1,71 @@
+# The header row of every layout: screen title and room, page dots, HA status and clock.
+obj:
+  x: 0
+  y: 0
+  width: 1280
+  height: 76
+  widgets:
+    - obj:
+        align: LEFT_MID
+        x: 30
+        width: SIZE_CONTENT
+        height: SIZE_CONTENT
+        layout:
+          type: flex
+          pad_column: 18
+          flex_flow: row
+          flex_align_cross: center
+        widgets:
+          - label:
+              id: title_label
+              text_font: font_title
+              text: Climate
+          - label:
+              text_font: font_label
+              text_color: ink_muted
+              text: ${room_name}
+    - obj:
+        align: CENTER
+        width: SIZE_CONTENT
+        height: SIZE_CONTENT
+        layout:
+          type: flex
+          pad_column: 14
+          flex_flow: row
+          flex_align_cross: center
+        widgets:
+          - obj:
+              id: dot_climate
+              width: 14
+              height: 14
+              radius: 7
+              bg_color: ink_primary
+              bg_opa: cover
+          - obj:
+              id: dot_substrate
+              width: 14
+              height: 14
+              radius: 7
+              bg_color: dot_dim
+              bg_opa: cover
+    - obj:
+        align: RIGHT_MID
+        x: -30
+        width: SIZE_CONTENT
+        height: SIZE_CONTENT
+        layout:
+          type: flex
+          pad_column: 22
+          flex_flow: row
+          flex_align_cross: center
+        widgets:
+          - label:
+              id: ha_offline
+              styles: status_chip
+              hidden: true
+              text: HA offline
+          - label:
+              id: clock_label
+              text_font: font_title
+              text: "--:--"
+
