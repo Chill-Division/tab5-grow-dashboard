@@ -10,7 +10,7 @@ substitutions:
   room_name: Grow room
 
   # Release to use. Change it to update; the package and its C++ helpers both follow it.
-  dashboard_ref: v0.1.1
+  dashboard_ref: v0.2.0
 
   # Your sensors in Home Assistant
   vpd_entity: sensor.room_vpd
@@ -42,6 +42,9 @@ substitutions:
   # The screens swap every cycle_interval, once nobody has touched them for cycle_pause
   cycle_interval: 30s
   cycle_pause: 3min
+
+  # Landscape. Use "270" if the picture is upside down for the way you've mounted it.
+  rotation: "90"
 
 packages:
   dashboard: github://Chill-Division/tab5-grow-dashboard/dashboard.yaml@${dashboard_ref}

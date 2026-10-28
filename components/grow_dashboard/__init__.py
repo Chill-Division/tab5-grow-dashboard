@@ -6,7 +6,7 @@ import esphome.config_validation as cv
 
 CODEOWNERS = ["@ChillingSilence"]
 DEPENDENCIES = ["lvgl"]
-AUTO_LOAD = ["json"]
+AUTO_LOAD = ["json", "sensor"]
 
 CONFIG_SCHEMA = cv.Schema({})
 

@@ -1,0 +1,538 @@
+# Shared part of the Tab5 grow dashboard: the board, Home Assistant sensors for the
+# climate screen, history backfill, sampling, screen cycling, fonts, colours and LVGL
+# styles. The layouts (dashboard.yaml, dashboard-zones.yaml) add the substrate screen
+# and the page itself. Don't include this file directly.
+
+substitutions:
+  name: m5stack-tab5
+  friendly_name: M5Stack Tab5
+  room_name: Grow room
+  # Release of this repo to use for the C++ helpers; set it to the same ref you include
+  # this package at, so the two always match.
+  dashboard_ref: main
+  # M5STACK-TAB5-ST7121 or M5STACK-TAB5-ST7123, whichever controller your panel has
+  display_model: M5STACK-TAB5-ST7121
+  # Landscape. Use 270 if the picture is upside down for the way you've mounted it.
+  rotation: "90"
+
+  # One block per tile: the HA entity, the unit shown, decimal places, and the target
+  # range (the green band on the chart; outside it the tile shows an amber High/Low).
+  # Entities need a state_class (most sensors have one) for their history to backfill.
+  vpd_entity: sensor.room_vpd
+  vpd_unit: kPa
+  vpd_decimals: "2"
+  vpd_low: "0.8"
+  vpd_high: "1.2"
+
+  co2_entity: sensor.room_co2
+  co2_unit: ppm
+  co2_decimals: "0"
+  co2_low: "800"
+  co2_high: "1200"
+
+  temp_entity: sensor.room_temperature
+  temp_unit: °C
+  temp_decimals: "1"
+  temp_low: "22"
+  temp_high: "28"
+
+  humidity_entity: sensor.room_humidity
+  humidity_unit: "%"
+  humidity_decimals: "0"
+  humidity_low: "55"
+  humidity_high: "70"
+
+  # Substrate tiles. Their entities are set by the layout: dashboard.yaml or
+  # dashboard-zones.yaml.
+  substrate_temp_unit: °C
+  substrate_temp_decimals: "1"
+  substrate_temp_low: "18"
+  substrate_temp_high: "24"
+
+  vwc_unit: "%"
+  vwc_decimals: "1"
+  vwc_low: "40"
+  vwc_high: "60"
+
+  bulk_ec_unit: dS/m
+  bulk_ec_decimals: "2"
+  bulk_ec_low: "1.5"
+  bulk_ec_high: "3.0"
+
+  # The screens swap every cycle_interval, once nobody has touched them for cycle_pause.
+  cycle_interval: 30s
+  cycle_pause: 3min
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 600
+      then:
+        - rx8130.read_time:
+    # The climate tiles' sensors and charts. Each layout registers its substrate tiles
+    # the same way, at the same priority.
+    - priority: -50
+      then:
+        - lambda: |-
+            using namespace grow_dashboard;
+            track(id(vpd), "${vpd_entity}");
+            track(id(co2), "${co2_entity}");
+            track(id(temp), "${temp_entity}");
+            track(id(humidity), "${humidity_entity}");
+            const char *range = "Last 6 h\n%s – %s";
+            // canvas, range label and text, entity, colour, target low/high, smallest y span, decimals
+            add_chart(id(vpd_chart), id(vpd_range), range, "${vpd_entity}", id(accent), ${vpd_low}, ${vpd_high}, 0.4, ${vpd_decimals});
+            add_chart(id(co2_chart), id(co2_range), range, "${co2_entity}", id(accent), ${co2_low}, ${co2_high}, 300, ${co2_decimals});
+            add_chart(id(temp_chart), id(temp_range), range, "${temp_entity}", id(accent), ${temp_low}, ${temp_high}, 3, ${temp_decimals});
+            add_chart(id(humidity_chart), id(humidity_range), range, "${humidity_entity}", id(accent), ${humidity_low}, ${humidity_high}, 10, ${humidity_decimals});
+    - priority: -100
+      then:
+        - lambda: |-
+            grow_dashboard::theme = {id(card_bg), id(grid_color), id(band_color), id(band_edge_color)};
+            grow_dashboard::draw_charts(true);
+        - script.execute: update_header
+        - script.execute: update_clock
+
+# The C++ helpers the lambdas below call (components/grow_dashboard in this repo)
+external_components:
+  - source: github://Chill-Division/tab5-grow-dashboard@${dashboard_ref}
+    components: [grow_dashboard]
+
+grow_dashboard:
+
+esp32:
+  variant: esp32p4
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true
+  # Drop this line if you have a production-revision board and it won't boot
+  engineering_sample: true
+
+# Wi-Fi / BT live on the on-board ESP32-C6, reached over SDIO
+esp32_hosted:
+  variant: esp32c6
+  active_high: true
+  clk_pin: GPIO12
+  cmd_pin: GPIO13
+  d0_pin: GPIO11
+  d1_pin: GPIO10
+  d2_pin: GPIO9
+  d3_pin: GPIO8
+  reset_pin: GPIO15
+  slot: 1
+
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+# Board-support I2C bus: RTC, INA226, GPIO expanders, touch
+i2c:
+  - id: bsp_bus
+    sda: GPIO31
+    scl: GPIO32
+    frequency: 400kHz
+
+# 2.5V rail required by the MIPI-DSI PHY
+esp_ldo:
+  - voltage: 2.5V
+    channel: 3
+
+# GPIO expanders: power rails, display and touch reset
+pi4ioe5v6408:
+  - id: pi4ioe1
+    address: 0x43
+  - id: pi4ioe2
+    address: 0x44
+
+output:
+  - platform: ledc
+    pin: GPIO22
+    id: backlight_pwm
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 250ms
+
+time:
+  # Battery-backed RTC, read at boot so the clock is sane before Wi-Fi
+  - platform: rx8130
+    id: rtc_time
+    i2c_id: bsp_bus
+    update_interval: never
+    timezone: UTC
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      - rx8130.write_time:
+      - script.execute: update_clock
+      # Fetch any missing chart history from HA (all of it after a reboot). Syncs repeat
+      # every 15 minutes, which also repairs gaps left by a dropped connection.
+      - if:
+          condition:
+            lambda: return grow_dashboard::any_gaps();
+          then:
+            - script.execute: backfill_history
+    on_time:
+      - seconds: 0
+        then:
+          - script.execute: update_clock
+
+switch:
+  # Leave this ON - switching it off kills the C6 radio
+  - platform: gpio
+    id: wifi_power
+    name: "WiFi Power"
+    pin:
+      pi4ioe5v6408: pi4ioe2
+      number: 0
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: charge_enable
+    name: "Charge Enable"
+    pin:
+      pi4ioe5v6408: pi4ioe2
+      number: 7
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: external_5v_power
+    name: "External 5V Power"
+    pin:
+      pi4ioe5v6408: pi4ioe1
+      number: 2
+
+sensor:
+  - platform: ina226
+    address: 0x41
+    adc_averaging: 16
+    max_current: 8.192A
+    shunt_resistance: 0.005ohm
+    bus_voltage:
+      id: battery_voltage
+      name: "Battery Voltage"
+    current:
+      id: battery_current
+      name: "Battery Current"
+
+  # Values from Home Assistant. Each update refreshes its tile's number and status;
+  # the charts are fed separately, by the 10 s sampler under interval:.
+  - platform: homeassistant
+    id: vpd
+    entity_id: ${vpd_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(vpd_value), id(vpd_target), id(vpd_status), x, ${vpd_decimals}, ${vpd_low}, ${vpd_high});
+  - platform: homeassistant
+    id: co2
+    entity_id: ${co2_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(co2_value), id(co2_target), id(co2_status), x, ${co2_decimals}, ${co2_low}, ${co2_high});
+  - platform: homeassistant
+    id: temp
+    entity_id: ${temp_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(temp_value), id(temp_target), id(temp_status), x, ${temp_decimals}, ${temp_low}, ${temp_high});
+  - platform: homeassistant
+    id: humidity
+    entity_id: ${humidity_entity}
+    on_value:
+      - lambda: grow_dashboard::show_value(id(humidity_value), id(humidity_target), id(humidity_status), x, ${humidity_decimals}, ${humidity_low}, ${humidity_high});
+
+captive_portal:
+
+display:
+  - platform: mipi_dsi
+    id: tab5_display
+    dimensions:
+      height: 1280
+      width: 720
+    model: ${display_model}
+    reset_pin:
+      pi4ioe5v6408: pi4ioe1
+      number: 4
+    # LVGL drives the panel, so no lambda here and no polling
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: st7123
+    id: tab5_touch
+    i2c_id: bsp_bus
+    display: tab5_display
+    interrupt_pin: GPIO23
+    reset_pin:
+      pi4ioe5v6408: pi4ioe1
+      number: 5
+
+globals:
+  # History requests sent without any answer. HA doesn't reply at all while device
+  # actions are disabled, so stop asking after a few.
+  - id: backfill_unanswered
+    type: int
+    initial_value: "0"
+
+script:
+  - id: update_header
+    then:
+      - lambda: |-
+          const bool climate = lv_tileview_get_tile_active(id(tiles)) == id(tile_climate);
+          lv_label_set_text(id(title_label), climate ? "Climate" : "Substrate");
+          lv_obj_set_style_bg_color(id(dot_climate), grow_dashboard::to_lv(climate ? id(ink_primary) : id(dot_dim)), LV_PART_MAIN);
+          lv_obj_set_style_bg_color(id(dot_substrate), grow_dashboard::to_lv(climate ? id(dot_dim) : id(ink_primary)), LV_PART_MAIN);
+
+  - id: update_clock
+    then:
+      - lvgl.label.update:
+          id: clock_label
+          text: !lambda |-
+            auto now = id(ha_time).now();
+            return now.is_valid() ? now.strftime("%H:%M") : std::string("--:--");
+
+  # Pulls the last 6 h of 5-minute means for every chart from HA's statistics. The
+  # response_template runs in HA and trims the reply to {"base": B, "stats": {entity:
+  # [[offset, mean], ...]}}, where B + offset is the unix time / 300 of each 5-minute
+  # period. Small offsets and means to 2 decimals keep 16 sensors' worth under 16 KiB.
+  - id: backfill_history
+    mode: single
+    then:
+      # The first time sync arrives the moment HA connects, before HA has subscribed to
+      # this device's action calls, and an action sent before then is dropped. So wait
+      # for the subscriptions first.
+      - wait_until:
+          condition:
+            api.connected:
+              state_subscription_only: true
+          timeout: 60s
+      - delay: 5s
+      - if:
+          condition:
+            api.connected:
+              state_subscription_only: true
+          then:
+            - if:
+                condition:
+                  lambda: return id(backfill_unanswered) < 3;
+                then:
+                  - lambda: |-
+                      id(backfill_unanswered)++;
+                      ESP_LOGI("history", "Requesting the last 6 h from Home Assistant");
+                  - homeassistant.action:
+                      action: recorder.get_statistics
+                      data:
+                        period: 5minute
+                        types: mean
+                      data_template:
+                        # Every charted entity, from the tiles registered at boot
+                        statistic_ids: !lambda return grow_dashboard::statistic_ids();
+                        start_time: "{{ (now() - timedelta(hours=6, minutes=10)).isoformat() }}"
+                      capture_response: true
+                      response_template: >-
+                        {%- set base = (as_timestamp(now()) | int) // 300 - 80 -%}
+                        {"base": {{ base }}, "stats": {
+                        {%- for entity, rows in response.statistics.items() -%}
+                        "{{ entity }}":[
+                        {%- for r in rows if 'mean' in r -%}
+                        [{{ (as_timestamp(r.start) | int) // 300 - base }},{{ r.mean | round(2) }}]{{ ',' if not loop.last }}
+                        {%- endfor -%}
+                        ]{{ ',' if not loop.last }}
+                        {%- endfor -%}
+                        }}
+                      on_success:
+                        - lambda: |-
+                            id(backfill_unanswered) = 0;
+                            JsonObjectConst reply = response["response"];
+                            JsonObjectConst stats = reply["stats"];
+                            grow_dashboard::backfill(stats, reply["base"].as<int32_t>(), id(ha_time).now().timestamp);
+                            ESP_LOGI("history", "Backfilled history for %u of %u charted sensors", (unsigned) stats.size(),
+                               (unsigned) grow_dashboard::trends().size());
+                      on_error:
+                        - lambda: |-
+                            id(backfill_unanswered) = 0;
+                            ESP_LOGW("history", "recorder.get_statistics failed: %s", error.c_str());
+                else:
+                  - logger.log:
+                      level: WARN
+                      tag: history
+                      format: >-
+                        Home Assistant did not answer the last 3 history requests. Enable "Allow the device
+                        to perform Home Assistant actions" for this device in HA, then restart the Tab5.
+
+interval:
+  # Sample every charted sensor into its trend. Readings only count while HA is connected;
+  # any gap is filled in from HA's statistics on the next time sync.
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            time.has_time:
+              id: ha_time
+          then:
+            - lambda: |-
+                grow_dashboard::sample_all(id(ha_time).now().timestamp,
+                                           api::global_api_server->is_connected_with_state_subscription());
+      - if:
+          condition:
+            api.connected:
+              state_subscription_only: true
+          then:
+            - lvgl.widget.hide: ha_offline
+          else:
+            - lvgl.widget.show: ha_offline
+
+  # Redraw one changed chart per tick, so a burst of updates never stalls touch input
+  - interval: 200ms
+    then:
+      - lambda: grow_dashboard::draw_charts(false);
+
+  # Flip between the two screens while nobody is using them
+  - interval: ${cycle_interval}
+    then:
+      - if:
+          condition:
+            lvgl.is_idle:
+              timeout: ${cycle_pause}
+          then:
+            - if:
+                condition:
+                  lambda: return lv_tileview_get_tile_active(id(tiles)) == id(tile_climate);
+                then:
+                  - lvgl.tileview.select:
+                      id: tiles
+                      tile_id: tile_substrate
+                      animated: true
+                else:
+                  - lvgl.tileview.select:
+                      id: tiles
+                      tile_id: tile_climate
+                      animated: true
+
+color:
+  - id: page_bg
+    hex: "0E1116"
+  - id: card_bg
+    hex: "161B22"
+  - id: ink_primary
+    hex: "F0F3F6"
+  - id: ink_secondary
+    hex: "B7C0CB"
+  - id: ink_muted
+    hex: "8B949E"
+  - id: dot_dim
+    hex: "3A424D"
+  - id: grid_color
+    hex: "262D36"
+  - id: band_color
+    hex: "152B1F"
+  - id: band_edge_color
+    hex: "1F5C2E"
+  - id: accent
+    hex: "3987E5"
+  # The two probes in a zone (dashboard-zones.yaml)
+  - id: probe1_color
+    hex: "3987E5"
+  - id: probe2_color
+    hex: "D95926"
+  - id: warning
+    hex: "FAB219"
+  - id: chip_ink
+    hex: "1A1A19"
+
+font:
+  - file: "gfonts://Inter@600"
+    id: font_title
+    size: 36
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°·–₂"
+  - file: "gfonts://Inter@500"
+    id: font_label
+    size: 32
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°·–₂µ³"
+  # Big numbers: digits only, to keep flash use down
+  - file: "gfonts://Inter@600"
+    id: font_value
+    size: 104
+    bpp: 4
+    glyphs: "0123456789.,-"
+  # Probe values on the zone tiles
+  - file: "gfonts://Inter@600"
+    id: font_mid
+    size: 48
+    bpp: 4
+    glyphs: "0123456789.,-"
+  - file: "gfonts://Inter@500"
+    id: font_unit
+    size: 34
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°µ³"
+  - file: "gfonts://Inter@500"
+    id: font_small
+    size: 26
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°·–▲▼₂µ³"
+
+lvgl:
+  displays: tab5_display
+  touchscreens: tab5_touch
+  rotation: ${rotation}
+  default_font: font_small
+  theme:
+    obj:
+      bg_opa: transp
+      border_width: 0
+      radius: 0
+      pad_all: 0
+      scrollable: false
+    label:
+      text_color: ink_primary
+  style_definitions:
+    - id: card
+      bg_color: card_bg
+      bg_opa: cover
+      radius: 24
+    - id: card_label
+      text_font: font_label
+      text_color: ink_secondary
+    - id: value_text
+      text_font: font_value
+      text_color: ink_primary
+    - id: unit_text
+      text_font: font_unit
+      text_color: ink_secondary
+      # Lifts the unit onto the big number's baseline
+      pad_bottom: 17
+    - id: hint_text
+      text_font: font_small
+      text_color: ink_muted
+    - id: range_text
+      text_font: font_small
+      text_color: ink_secondary
+    - id: status_chip
+      text_font: font_small
+      text_color: chip_ink
+      bg_color: warning
+      bg_opa: cover
+      radius: 20
+      pad_left: 14
+      pad_right: 14
+      pad_top: 3
+      pad_bottom: 3
+    - id: zone_name
+      text_font: font_label
+      text_color: ink_primary
+    - id: probe_value
+      text_font: font_mid
+      text_color: ink_primary

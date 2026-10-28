@@ -1,0 +1,99 @@
+# Tab5 grow dashboard for the M5Stack Tab5 (ST7121/ST7123 panel): zones layout
+#
+# Two swipeable screens of Home Assistant data:
+#   Climate:   VPD, CO2, temperature and humidity, each with a 6-hour chart
+#   Substrate: one row per zone (three zones, two probes each): the zone's substrate
+#              temperature, then VWC and bulk EC, each with both probes' values and a
+#              6-hour chart with a line per probe
+# For a single probe, use dashboard.yaml instead.
+#
+# Don't edit this file: include it from your device YAML (see example-zones.yaml) and
+# override the substitutions there. The defaults are here and in parts/base.yaml. Your
+# device YAML also holds wifi/api/ota, since remote packages can't use secrets.
+#
+# Needs ESPHome 2026.8 or newer. In Home Assistant, turn on "Allow the device to perform
+# Home Assistant actions" for the device, so it can fetch the last 6 hours from HA's
+# statistics at boot.
+
+substitutions:
+  # Each zone: its name, then VWC, bulk EC and temperature from probe 1 and probe 2.
+  # Units, decimal places and target ranges are the vwc_*, bulk_ec_* and
+  # substrate_temp_* settings in parts/base.yaml, shared by all zones.
+  zone1_name: Zone 1
+  zone1_vwc_1: sensor.zone1_probe1_vwc
+  zone1_vwc_2: sensor.zone1_probe2_vwc
+  zone1_ec_1: sensor.zone1_probe1_bulk_ec
+  zone1_ec_2: sensor.zone1_probe2_bulk_ec
+  zone1_temp_1: sensor.zone1_probe1_temperature
+  zone1_temp_2: sensor.zone1_probe2_temperature
+
+  zone2_name: Zone 2
+  zone2_vwc_1: sensor.zone2_probe1_vwc
+  zone2_vwc_2: sensor.zone2_probe2_vwc
+  zone2_ec_1: sensor.zone2_probe1_bulk_ec
+  zone2_ec_2: sensor.zone2_probe2_bulk_ec
+  zone2_temp_1: sensor.zone2_probe1_temperature
+  zone2_temp_2: sensor.zone2_probe2_temperature
+
+  zone3_name: Zone 3
+  zone3_vwc_1: sensor.zone3_probe1_vwc
+  zone3_vwc_2: sensor.zone3_probe2_vwc
+  zone3_ec_1: sensor.zone3_probe1_bulk_ec
+  zone3_ec_2: sensor.zone3_probe2_bulk_ec
+  zone3_temp_1: sensor.zone3_probe1_temperature
+  zone3_temp_2: sensor.zone3_probe2_temperature
+
+packages:
+  base: !include parts/base.yaml
+  zone1: !include
+    file: parts/zone.yaml
+    vars:
+      n: 1
+      vwc_1: ${zone1_vwc_1}
+      vwc_2: ${zone1_vwc_2}
+      ec_1: ${zone1_ec_1}
+      ec_2: ${zone1_ec_2}
+      temp_1: ${zone1_temp_1}
+      temp_2: ${zone1_temp_2}
+  zone2: !include
+    file: parts/zone.yaml
+    vars:
+      n: 2
+      vwc_1: ${zone2_vwc_1}
+      vwc_2: ${zone2_vwc_2}
+      ec_1: ${zone2_ec_1}
+      ec_2: ${zone2_ec_2}
+      temp_1: ${zone2_temp_1}
+      temp_2: ${zone2_temp_2}
+  zone3: !include
+    file: parts/zone.yaml
+    vars:
+      n: 3
+      vwc_1: ${zone3_vwc_1}
+      vwc_2: ${zone3_vwc_2}
+      ec_1: ${zone3_ec_1}
+      ec_2: ${zone3_ec_2}
+      temp_1: ${zone3_temp_1}
+      temp_2: ${zone3_temp_2}
+
+lvgl:
+  pages:
+    - id: main_page
+      bg_color: page_bg
+      bg_opa: cover
+      scrollable: false
+      widgets:
+        - !include parts/header.yaml
+        - tileview:
+            id: tiles
+            x: 0
+            y: 76
+            width: 1280
+            height: 644
+            bg_opa: transp
+            scrollbar_mode: "OFF"
+            on_value:
+              - script.execute: update_header
+            tiles:
+              - !include parts/climate-tile.yaml
+              - !include parts/zones-tile.yaml

@@ -1,0 +1,190 @@
+# The substrate screen of dashboard.yaml: temperature, VWC and bulk EC from one probe.
+id: tile_substrate
+row: 0
+column: 1
+dir: HOR
+widgets:
+  - obj:
+      styles: card
+      x: 20
+      y: 4
+      width: 1240
+      height: 196
+      widgets:
+        - label:
+            styles: card_label
+            x: 26
+            y: 12
+            text: Temperature
+        - obj:
+            x: 26
+            y: 34
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 10
+              flex_flow: row
+              flex_align_cross: end
+            widgets:
+              - label:
+                  id: substrate_temp_value
+                  styles: value_text
+                  text: "--"
+              - label:
+                  styles: unit_text
+                  text: ${substrate_temp_unit}
+        # Target hint (or the High/Low chip), then the 6 h range
+        - obj:
+            x: 26
+            y: 148
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 24
+              flex_flow: row
+              flex_align_cross: center
+            widgets:
+              - label:
+                  id: substrate_temp_target
+                  styles: hint_text
+                  text: "Target ${substrate_temp_low}–${substrate_temp_high}"
+              - label:
+                  id: substrate_temp_status
+                  styles: status_chip
+                  hidden: true
+                  text: ""
+              - label:
+                  id: substrate_temp_range
+                  styles: range_text
+                  text: ""
+        - canvas:
+            id: substrate_temp_chart
+            x: 480
+            y: 20
+            width: 734
+            height: 156
+
+  - obj:
+      styles: card
+      x: 20
+      y: 216
+      width: 1240
+      height: 196
+      widgets:
+        - label:
+            styles: card_label
+            x: 26
+            y: 12
+            text: VWC
+        - obj:
+            x: 26
+            y: 34
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 10
+              flex_flow: row
+              flex_align_cross: end
+            widgets:
+              - label:
+                  id: vwc_value
+                  styles: value_text
+                  text: "--"
+              - label:
+                  styles: unit_text
+                  text: ${vwc_unit}
+        - obj:
+            x: 26
+            y: 148
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 24
+              flex_flow: row
+              flex_align_cross: center
+            widgets:
+              - label:
+                  id: vwc_target
+                  styles: hint_text
+                  text: "Target ${vwc_low}–${vwc_high}"
+              - label:
+                  id: vwc_status
+                  styles: status_chip
+                  hidden: true
+                  text: ""
+              - label:
+                  id: vwc_range
+                  styles: range_text
+                  text: ""
+        - canvas:
+            id: vwc_chart
+            x: 480
+            y: 20
+            width: 734
+            height: 156
+
+  - obj:
+      styles: card
+      x: 20
+      y: 428
+      width: 1240
+      height: 196
+      widgets:
+        - label:
+            styles: card_label
+            x: 26
+            y: 12
+            text: Bulk EC
+        - obj:
+            x: 26
+            y: 34
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 10
+              flex_flow: row
+              flex_align_cross: end
+            widgets:
+              - label:
+                  id: bulk_ec_value
+                  styles: value_text
+                  text: "--"
+              - label:
+                  styles: unit_text
+                  text: ${bulk_ec_unit}
+        - obj:
+            x: 26
+            y: 148
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 24
+              flex_flow: row
+              flex_align_cross: center
+            widgets:
+              - label:
+                  id: bulk_ec_target
+                  styles: hint_text
+                  text: "Target ${bulk_ec_low}–${bulk_ec_high}"
+              - label:
+                  id: bulk_ec_status
+                  styles: status_chip
+                  hidden: true
+                  text: ""
+              - label:
+                  id: bulk_ec_range
+                  styles: range_text
+                  text: ""
+        - canvas:
+            id: bulk_ec_chart
+            x: 480
+            y: 20
+            width: 734
+            height: 156
+

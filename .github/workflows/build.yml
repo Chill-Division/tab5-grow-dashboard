@@ -10,10 +10,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [example.yaml, example-zones.yaml]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -24,7 +28,7 @@ jobs:
           echo "version=$(esphome version | sed 's/^Version: //')" >> "$GITHUB_OUTPUT"
 
       - name: Cache ESP-IDF
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/esphome
           key: esphome-${{ steps.esphome.outputs.version }}
@@ -37,9 +41,9 @@ jobs:
           api_encryption_key: "pWj5Yzc8nG8b1Vq9mJ1nqVp4o4Zr7f5VZb9cKqI4b2E="
           EOF
 
-      # Build example.yaml against this commit rather than the release it names
+      # Build the example against this commit rather than the release it names
       - name: Validate
-        run: esphome -s dashboard_ref ${{ github.sha }} config example.yaml
+        run: esphome -s dashboard_ref ${{ github.sha }} config ${{ matrix.example }}
 
       - name: Compile
-        run: esphome -s dashboard_ref ${{ github.sha }} compile example.yaml
+        run: esphome -s dashboard_ref ${{ github.sha }} compile ${{ matrix.example }}

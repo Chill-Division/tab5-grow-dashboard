@@ -1,0 +1,49 @@
+# One zone of dashboard-zones.yaml: its six Home Assistant sensors (VWC, bulk EC and
+# temperature from each of two probes) and the two charts they feed.
+# vars: n (zone number), vwc_1, vwc_2, ec_1, ec_2, temp_1, temp_2 (entity IDs)
+
+esphome:
+  on_boot:
+    - priority: -50
+      then:
+        - lambda: |-
+            using namespace grow_dashboard;
+            track(id(zone${n}_vwc_1), "${vwc_1}");
+            track(id(zone${n}_vwc_2), "${vwc_2}");
+            track(id(zone${n}_ec_1), "${ec_1}");
+            track(id(zone${n}_ec_2), "${ec_2}");
+            // canvas, probe 1 entity and colour, probe 2 entity and colour, target low/high, smallest y span, decimals
+            add_chart(id(zone${n}_vwc_chart), "${vwc_1}", id(probe1_color), "${vwc_2}", id(probe2_color), ${vwc_low}, ${vwc_high}, 10, ${vwc_decimals});
+            add_chart(id(zone${n}_ec_chart), "${ec_1}", id(probe1_color), "${ec_2}", id(probe2_color), ${bulk_ec_low}, ${bulk_ec_high}, 0.6, ${bulk_ec_decimals});
+
+sensor:
+  - platform: homeassistant
+    id: zone${n}_vwc_1
+    entity_id: ${vwc_1}
+    on_value:
+      - lambda: grow_dashboard::show_pair(id(zone${n}_vwc_1_value), id(zone${n}_vwc_2_value), id(zone${n}_vwc_target), id(zone${n}_vwc_status), id(zone${n}_vwc_1).state, id(zone${n}_vwc_2).state, ${vwc_decimals}, ${vwc_low}, ${vwc_high});
+  - platform: homeassistant
+    id: zone${n}_vwc_2
+    entity_id: ${vwc_2}
+    on_value:
+      - lambda: grow_dashboard::show_pair(id(zone${n}_vwc_1_value), id(zone${n}_vwc_2_value), id(zone${n}_vwc_target), id(zone${n}_vwc_status), id(zone${n}_vwc_1).state, id(zone${n}_vwc_2).state, ${vwc_decimals}, ${vwc_low}, ${vwc_high});
+  - platform: homeassistant
+    id: zone${n}_ec_1
+    entity_id: ${ec_1}
+    on_value:
+      - lambda: grow_dashboard::show_pair(id(zone${n}_ec_1_value), id(zone${n}_ec_2_value), id(zone${n}_ec_target), id(zone${n}_ec_status), id(zone${n}_ec_1).state, id(zone${n}_ec_2).state, ${bulk_ec_decimals}, ${bulk_ec_low}, ${bulk_ec_high});
+  - platform: homeassistant
+    id: zone${n}_ec_2
+    entity_id: ${ec_2}
+    on_value:
+      - lambda: grow_dashboard::show_pair(id(zone${n}_ec_1_value), id(zone${n}_ec_2_value), id(zone${n}_ec_target), id(zone${n}_ec_status), id(zone${n}_ec_1).state, id(zone${n}_ec_2).state, ${bulk_ec_decimals}, ${bulk_ec_low}, ${bulk_ec_high});
+  - platform: homeassistant
+    id: zone${n}_temp_1
+    entity_id: ${temp_1}
+    on_value:
+      - lambda: grow_dashboard::show_average(id(zone${n}_temp), id(zone${n}_temp_1).state, id(zone${n}_temp_2).state, ${substrate_temp_decimals}, "${substrate_temp_unit}");
+  - platform: homeassistant
+    id: zone${n}_temp_2
+    entity_id: ${temp_2}
+    on_value:
+      - lambda: grow_dashboard::show_average(id(zone${n}_temp), id(zone${n}_temp_1).state, id(zone${n}_temp_2).state, ${substrate_temp_decimals}, "${substrate_temp_unit}");

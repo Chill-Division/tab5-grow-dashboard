@@ -1,0 +1,246 @@
+# The climate screen: VPD, CO2, temperature and humidity, each with a 6-hour chart.
+id: tile_climate
+row: 0
+column: 0
+dir: HOR
+widgets:
+  - obj:
+      styles: card
+      x: 20
+      y: 4
+      width: 612
+      height: 302
+      widgets:
+        - label:
+            styles: card_label
+            x: 26
+            y: 18
+            text: VPD
+        - label:
+            id: vpd_target
+            styles: hint_text
+            align: TOP_RIGHT
+            x: -26
+            y: 24
+            text: "Target ${vpd_low}–${vpd_high}"
+        - label:
+            id: vpd_status
+            styles: status_chip
+            align: TOP_RIGHT
+            x: -20
+            y: 20
+            hidden: true
+            text: ""
+        - obj:
+            x: 26
+            y: 48
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 10
+              flex_flow: row
+              flex_align_cross: end
+            widgets:
+              - label:
+                  id: vpd_value
+                  styles: value_text
+                  text: "--"
+              - label:
+                  styles: unit_text
+                  text: ${vpd_unit}
+        - label:
+            id: vpd_range
+            styles: range_text
+            align: TOP_RIGHT
+            x: -26
+            y: 84
+            text_align: RIGHT
+            text: ""
+        - canvas:
+            id: vpd_chart
+            x: 26
+            y: 172
+            width: 560
+            height: 110
+
+  - obj:
+      styles: card
+      x: 648
+      y: 4
+      width: 612
+      height: 302
+      widgets:
+        - label:
+            styles: card_label
+            x: 26
+            y: 18
+            text: CO₂
+        - label:
+            id: co2_target
+            styles: hint_text
+            align: TOP_RIGHT
+            x: -26
+            y: 24
+            text: "Target ${co2_low}–${co2_high}"
+        - label:
+            id: co2_status
+            styles: status_chip
+            align: TOP_RIGHT
+            x: -20
+            y: 20
+            hidden: true
+            text: ""
+        - obj:
+            x: 26
+            y: 48
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 10
+              flex_flow: row
+              flex_align_cross: end
+            widgets:
+              - label:
+                  id: co2_value
+                  styles: value_text
+                  text: "--"
+              - label:
+                  styles: unit_text
+                  text: ${co2_unit}
+        - label:
+            id: co2_range
+            styles: range_text
+            align: TOP_RIGHT
+            x: -26
+            y: 84
+            text_align: RIGHT
+            text: ""
+        - canvas:
+            id: co2_chart
+            x: 26
+            y: 172
+            width: 560
+            height: 110
+
+  - obj:
+      styles: card
+      x: 20
+      y: 322
+      width: 612
+      height: 302
+      widgets:
+        - label:
+            styles: card_label
+            x: 26
+            y: 18
+            text: Temperature
+        - label:
+            id: temp_target
+            styles: hint_text
+            align: TOP_RIGHT
+            x: -26
+            y: 24
+            text: "Target ${temp_low}–${temp_high}"
+        - label:
+            id: temp_status
+            styles: status_chip
+            align: TOP_RIGHT
+            x: -20
+            y: 20
+            hidden: true
+            text: ""
+        - obj:
+            x: 26
+            y: 48
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 10
+              flex_flow: row
+              flex_align_cross: end
+            widgets:
+              - label:
+                  id: temp_value
+                  styles: value_text
+                  text: "--"
+              - label:
+                  styles: unit_text
+                  text: ${temp_unit}
+        - label:
+            id: temp_range
+            styles: range_text
+            align: TOP_RIGHT
+            x: -26
+            y: 84
+            text_align: RIGHT
+            text: ""
+        - canvas:
+            id: temp_chart
+            x: 26
+            y: 172
+            width: 560
+            height: 110
+
+  - obj:
+      styles: card
+      x: 648
+      y: 322
+      width: 612
+      height: 302
+      widgets:
+        - label:
+            styles: card_label
+            x: 26
+            y: 18
+            text: Humidity
+        - label:
+            id: humidity_target
+            styles: hint_text
+            align: TOP_RIGHT
+            x: -26
+            y: 24
+            text: "Target ${humidity_low}–${humidity_high}"
+        - label:
+            id: humidity_status
+            styles: status_chip
+            align: TOP_RIGHT
+            x: -20
+            y: 20
+            hidden: true
+            text: ""
+        - obj:
+            x: 26
+            y: 48
+            width: SIZE_CONTENT
+            height: SIZE_CONTENT
+            layout:
+              type: flex
+              pad_column: 10
+              flex_flow: row
+              flex_align_cross: end
+            widgets:
+              - label:
+                  id: humidity_value
+                  styles: value_text
+                  text: "--"
+              - label:
+                  styles: unit_text
+                  text: ${humidity_unit}
+        - label:
+            id: humidity_range
+            styles: range_text
+            align: TOP_RIGHT
+            x: -26
+            y: 84
+            text_align: RIGHT
+            text: ""
+        - canvas:
+            id: humidity_chart
+            x: 26
+            y: 172
+            width: 560
+            height: 110
+
