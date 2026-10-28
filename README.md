@@ -57,6 +57,7 @@ Set any of these under `substitutions:` in your device YAML. The defaults are at
 | `display_model` | `M5STACK-TAB5-ST7121` | `M5STACK-TAB5-ST7123` if your panel has that controller |
 | `rotation` | `90` | `270` if the picture is upside down for the way it's mounted |
 | `cycle_interval`, `cycle_pause` | `30s`, `3min` | How often the screens swap, once nobody has touched them for `cycle_pause` |
+| `cycle_slide` | `OFF` | `ON` to slide between screens when they swap on their own. Swiping by hand always slides |
 | `<tile>_entity` | | The Home Assistant sensor for a tile (one-probe layout, and the climate tiles in both) |
 | `<tile>_unit` | | Unit shown next to the value (display only) |
 | `<tile>_decimals` | | Decimal places |

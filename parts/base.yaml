@@ -62,6 +62,9 @@ substitutions:
   # The screens swap every cycle_interval, once nobody has touched them for cycle_pause.
   cycle_interval: 30s
   cycle_pause: 3min
+  # "ON" to slide when the screens swap on their own. Off by default: each frame of the
+  # slide is a full-screen redraw, so it stutters. Swiping by hand always slides.
+  cycle_slide: "OFF"
 
 esphome:
   name: ${name}
@@ -408,12 +411,12 @@ interval:
                   - lvgl.tileview.select:
                       id: tiles
                       tile_id: tile_substrate
-                      animated: true
+                      animated: ${cycle_slide}
                 else:
                   - lvgl.tileview.select:
                       id: tiles
                       tile_id: tile_climate
-                      animated: true
+                      animated: ${cycle_slide}
 
 color:
   - id: page_bg
@@ -488,6 +491,10 @@ lvgl:
   displays: tab5_display
   touchscreens: tab5_touch
   rotation: ${rotation}
+  # An eighth of the screen per pass. ESPHome keeps a buffer this small in the P4's
+  # internal RAM, which redraws the full screen about twice as fast as a full-size buffer
+  # in PSRAM (~115 ms instead of ~250 ms on a Tab5).
+  buffer_size: 12%
   default_font: font_small
   theme:
     obj:
